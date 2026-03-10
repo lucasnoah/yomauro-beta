@@ -56,7 +56,7 @@ pipeline:
       parser: generic
       timeout: "2m"
     test-go:
-      command: "go test ./..."
+      command: "go test -p 1 ./..."
       parser: generic
       timeout: "5m"
     test-web:

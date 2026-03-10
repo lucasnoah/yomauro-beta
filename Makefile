@@ -15,7 +15,7 @@ migrate-up:
 
 # Testing
 test:
-	go test ./...
+	go test -p 1 ./...
 	cd web && npm test
 
 # Setup
