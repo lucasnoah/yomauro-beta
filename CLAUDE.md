@@ -2,6 +2,10 @@
 
 Shared tooling, conventions, and patterns for Claude Code projects.
 
+## Makefile Convention
+
+**All entrypoints go through the root `Makefile`.** Every operation — running the server, building, migrating, generating code, installing dependencies — must have a `make` target. No bare `go run`, `npm run`, or `migrate` commands in documentation or workflows. If it's a thing you do, it's a `make` target.
+
 ## Go Conventions
 
 - All packages live under `internal/` (unexported to external modules)
