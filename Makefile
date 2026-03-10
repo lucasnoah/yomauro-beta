@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db migrate migrate-create sqlc build web-dev web-build test setup
+.PHONY: dev dev-api db migrate migrate-up migrate-create sqlc build web-dev web-build test setup
 
 # Development
 dev-api:
@@ -20,6 +20,15 @@ migrate:
 	 [ -f .env ] && . ./.env; \
 	 set +a; \
 	 migrate -database "$$DATABASE_URL" -path migrations/ up
+
+migrate-up:
+	@if command -v migrate >/dev/null 2>&1; then \
+		set -a; \
+		[ -f config/.env ] && . ./config/.env; \
+		[ -f .env ] && . ./.env; \
+		set +a; \
+		migrate -database "$$DATABASE_URL" -path migrations/ up; \
+	else echo "migrate not installed, skipping"; fi
 
 migrate-create:
 	@read -p "Migration name: " name; \
