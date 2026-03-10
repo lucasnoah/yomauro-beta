@@ -11,7 +11,7 @@ db:
 	docker compose up -d postgres
 
 migrate-up:
-	go run ./cmd/migrate/
+	@if [ -d cmd/migrate ]; then go run ./cmd/migrate/; else echo "No migrations yet"; fi
 
 # Testing
 test:
