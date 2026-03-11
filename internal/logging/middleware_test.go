@@ -149,3 +149,38 @@ func TestStatusWriter_WriteHeaderDelegatesOnce(t *testing.T) {
 		t.Errorf("expected captured status 404, got %d", sw.status)
 	}
 }
+
+func TestStatusWriter_WriteCommitsImplicit200(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, status: http.StatusOK}
+
+	sw.Write([]byte("body"))
+	// After Write, the implicit 200 is committed; a subsequent WriteHeader must be ignored.
+	sw.WriteHeader(http.StatusInternalServerError)
+
+	if sw.status != http.StatusOK {
+		t.Errorf("expected status 200 after Write-then-WriteHeader, got %d", sw.status)
+	}
+}
+
+func TestLoggingMiddleware_EmptyRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	// Use LoggingMiddleware alone, without RequestIDMiddleware — request_id must be empty string.
+	handler := LoggingMiddleware(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	handler.ServeHTTP(rec, req)
+
+	var entry map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("log output is not valid JSON: %v", err)
+	}
+	if entry["request_id"] != "" {
+		t.Errorf("expected empty request_id when no RequestIDMiddleware, got %v", entry["request_id"])
+	}
+}

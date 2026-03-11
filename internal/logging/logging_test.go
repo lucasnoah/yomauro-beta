@@ -1,9 +1,7 @@
 package logging
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"testing"
 )
@@ -34,19 +32,9 @@ func TestNew_Production(t *testing.T) {
 }
 
 func TestNew_ProductionJSON(t *testing.T) {
-	var buf bytes.Buffer
-	// Create a JSON handler writing to a buffer to verify JSON output.
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	logger.Info("test message", slog.String("key", "value"))
-
-	var entry map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
-		t.Fatalf("production logger output is not valid JSON: %v", err)
-	}
-	if entry["msg"] != "test message" {
-		t.Errorf("expected msg 'test message', got %v", entry["msg"])
+	logger := New("production")
+	if _, ok := logger.Handler().(*slog.JSONHandler); !ok {
+		t.Errorf("production logger should use JSONHandler, got %T", logger.Handler())
 	}
 }
 
