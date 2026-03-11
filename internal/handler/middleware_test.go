@@ -42,6 +42,11 @@ func TestCORSMiddleware_DisallowedOrigin(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("expected no Allow-Origin header for disallowed origin, got %q", got)
 	}
+	// Vary: Origin must still be set so caches do not serve this no-CORS response
+	// to a later request from an allowed origin.
+	if got := rec.Header().Get("Vary"); got != "Origin" {
+		t.Errorf("expected Vary 'Origin' for disallowed origin request, got %q", got)
+	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
@@ -135,6 +140,69 @@ func TestCORSMiddleware_NoOriginHeader(t *testing.T) {
 
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("expected no CORS headers when no Origin header, got %q", got)
+	}
+}
+
+func TestCORSMiddleware_OptionsNoOrigin(t *testing.T) {
+	// OPTIONS without an Origin header is not a preflight — it should be
+	// forwarded to the next handler without any CORS response headers.
+	mw := CORSMiddleware("http://localhost:3000")
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/api/test", nil)
+	handler.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("next handler should be called for OPTIONS without Origin")
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("expected no CORS headers for OPTIONS without Origin, got %q", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "" {
+		t.Errorf("expected no Vary header when no Origin is present, got %q", got)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestCORSMiddleware_VaryComposesWithExisting(t *testing.T) {
+	// Verify that Vary: Origin is added (not set), so it does not overwrite
+	// a Vary header already written by other middleware (e.g. Accept-Encoding).
+	mw := CORSMiddleware("http://localhost:3000")
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	// Simulate a prior middleware that sets Vary: Accept-Encoding.
+	rec.Header().Set("Vary", "Accept-Encoding")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	handler.ServeHTTP(rec, req)
+
+	vary := rec.Header()["Vary"]
+	hasAcceptEncoding := false
+	hasOrigin := false
+	for _, v := range vary {
+		if v == "Accept-Encoding" {
+			hasAcceptEncoding = true
+		}
+		if v == "Origin" {
+			hasOrigin = true
+		}
+	}
+	if !hasAcceptEncoding {
+		t.Error("Vary: Accept-Encoding was overwritten by CORS middleware")
+	}
+	if !hasOrigin {
+		t.Error("Vary: Origin was not added by CORS middleware")
 	}
 }
 
