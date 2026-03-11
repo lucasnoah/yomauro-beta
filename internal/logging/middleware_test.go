@@ -111,6 +111,17 @@ func TestLoggingMiddleware_DefaultStatus200(t *testing.T) {
 	}
 }
 
+// countingResponseWriter counts how many times WriteHeader is called.
+type countingResponseWriter struct {
+	http.ResponseWriter
+	writeHeaderCalls int
+}
+
+func (w *countingResponseWriter) WriteHeader(code int) {
+	w.writeHeaderCalls++
+	w.ResponseWriter.WriteHeader(code)
+}
+
 func TestStatusWriter_WriteHeaderOnce(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sw := &statusWriter{ResponseWriter: rec, status: http.StatusOK}
@@ -120,5 +131,21 @@ func TestStatusWriter_WriteHeaderOnce(t *testing.T) {
 
 	if sw.status != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", sw.status)
+	}
+}
+
+func TestStatusWriter_WriteHeaderDelegatesOnce(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := &countingResponseWriter{ResponseWriter: rec}
+	sw := &statusWriter{ResponseWriter: cw, status: http.StatusOK}
+
+	sw.WriteHeader(http.StatusNotFound)
+	sw.WriteHeader(http.StatusInternalServerError) // duplicate — must not reach underlying writer
+
+	if cw.writeHeaderCalls != 1 {
+		t.Errorf("underlying WriteHeader should be called exactly once, got %d", cw.writeHeaderCalls)
+	}
+	if sw.status != http.StatusNotFound {
+		t.Errorf("expected captured status 404, got %d", sw.status)
 	}
 }
