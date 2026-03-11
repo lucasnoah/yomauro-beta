@@ -225,6 +225,101 @@ func TestDefaultConstants(t *testing.T) {
 	}
 }
 
+func TestMaxResponseBody_ZeroLimit(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	handler := MaxResponseBody(0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("x")) // any non-empty write must panic
+	}))
+
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r == http.ErrAbortHandler {
+				panicked = true
+			}
+		}()
+		handler.ServeHTTP(rec, req)
+	}()
+
+	if !panicked {
+		t.Fatal("expected panic with http.ErrAbortHandler for zero limit")
+	}
+	// No bytes from the oversized write must be in the response body.
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty response body, got %d bytes: %q", rec.Body.Len(), rec.Body.String())
+	}
+}
+
+// TestMaxResponseBody_NoPartialWriteOnExceed verifies that when a single write
+// exceeds the remaining budget, none of its bytes are flushed before the panic.
+// Prior to the fix, the code wrote b[:allowed] before panicking, producing a
+// malformed partial response body.
+func TestMaxResponseBody_NoPartialWriteOnExceed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	// Limit of 5: the first write (3 bytes) fits; the second (10 bytes) exceeds.
+	handler := MaxResponseBody(5)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("abc"))               // 3 bytes, fits
+		w.Write([]byte("0123456789"))        // 10 bytes, exceeds — must not write any
+	}))
+
+	func() {
+		defer func() { recover() }()
+		handler.ServeHTTP(rec, req)
+	}()
+
+	// Only the first write's 3 bytes must appear in the response.
+	if got := rec.Body.String(); got != "abc" {
+		t.Errorf("expected body %q, got %q — partial bytes from oversized write must not be flushed", "abc", got)
+	}
+}
+
+// TestMaxResponseBody_ExceededStateBlocksSubsequentWrites verifies that once
+// the limit is exceeded (exceeded=true), any subsequent Write returns an error
+// without panicking again or writing bytes. This path is reachable when a
+// deferred function in the handler recovers the ErrAbortHandler panic and then
+// writes to the response writer.
+func TestMaxResponseBody_ExceededStateBlocksSubsequentWrites(t *testing.T) {
+	lw := &limitedResponseWriter{
+		ResponseWriter: httptest.NewRecorder(),
+		remaining:      0,
+		exceeded:       true,
+	}
+
+	n, err := lw.Write([]byte("after limit"))
+	if err == nil {
+		t.Fatal("expected error when writing after limit exceeded")
+	}
+	if n != 0 {
+		t.Errorf("expected 0 bytes written, got %d", n)
+	}
+}
+
+// TestMaxRequestBody_HandlerIgnoresReadError verifies that MaxRequestBody does
+// NOT automatically send 413 when the handler reads the body but ignores the
+// error. The 413 is the handler's responsibility.
+func TestMaxRequestBody_HandlerIgnoresReadError(t *testing.T) {
+	body := strings.NewReader(strings.Repeat("x", 100))
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rec := httptest.NewRecorder()
+
+	handler := MaxRequestBody(10)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.ReadAll(r.Body) // intentionally ignoring the error
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	handler.ServeHTTP(rec, req)
+
+	// Without the handler checking the error, the response is 200 — not 413.
+	// This documents that MaxRequestBody alone does not enforce 413.
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 (handler did not check error), got %d", rec.Code)
+	}
+}
+
 // --- Integration: both middleware chained ---
 
 func TestChainedMiddleware_RequestWithinLimit(t *testing.T) {
